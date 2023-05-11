@@ -1,0 +1,306 @@
+clear;clc;close all;rng(0);
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% load fmri data and correlate with gradients
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+% subjects = { ...
+%     'rest_hcp156637_ts'...
+%     'rest_hcp154734_ts'...
+%     'rest_hcp155637_ts'...
+%     'rest_hcp159340_ts'...
+%     'rest_hcp160123_ts'...
+%     'rest_hcp161731_ts'...
+%     'rest_hcp162733_ts'...
+%     'rest_hcp163129_ts'...
+%     'rest_hcp176542_ts'...
+%     'rest_hcp178950_ts'...
+%     'rest_hcp188347_ts'...
+%     'rest_hcp189450_ts'...
+%     'rest_hcp190031_ts'...
+%     'rest_hcp192540_ts'...
+%     'rest_hcp196750_ts'...
+%     'rest_hcp198451_ts'...
+%     'rest_hcp199655_ts'...
+%     'rest_hcp201111_ts'...
+%     'rest_hcp208226_ts'...
+%     'rest_hcp211417_ts'...
+%     'rest_hcp211720_ts'...
+%     'rest_hcp212321_ts'...
+%     'rest_hcp214423_ts'...
+%     'rest_hcp221319_ts'...
+%     'rest_hcp239944_ts'...
+%     'rest_hcp245333_ts'...
+%     'rest_hcp280739_ts'...
+%     'rest_hcp298051_ts'...
+%     'rest_hcp366446_ts'...
+%     'rest_hcp397760_ts'...
+%     'rest_hcp414229_ts'...
+%     'rest_hcp499566_ts'...
+%     'rest_hcp654754_ts'...
+%     'rest_hcp672756_ts'...
+%     'rest_hcp751348_ts'...
+%     'rest_hcp756055_ts'...
+%     'rest_hcp792564_ts'...
+%     'rest_hcp856766_ts'...
+%     'rest_hcp857263_ts'...
+%     'rest_hcp899885_ts'...
+%     };
+%
+% grads = importdata('~/Library/CloudStorage/Dropbox/Phase/Margulies/3');
+%
+% % load fMRI data and correlate with gradients
+% for ii = 1:numel(subjects)
+%     disp(['loading fMRI data ' num2str(ii) '/' num2str(numel(subjects))])
+%     clear temp
+%     temp = load(['~/Library/CloudStorage/Dropbox/HCP/hcp_fix_ts/' subjects{ii}]);
+%     corrdat(:,:,ii) = corr(temp',grads);
+% end
+% save('corrdat.mat','corrdat');
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% perform model inversions per subject in 2 separate time splits
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+load('corrdat.mat','corrdat');
+
+n               = 3;
+N               = 600;
+prec            = 0;
+
+U               = zeros(1,N);
+
+pE.A            = -eye(n)/15;
+pE.C            = zeros(n,1);
+pE.s            = 1;
+
+pC.A            = ones(n);
+pC.C            = ones(n,1);
+pC.s            = 1;
+
+c = -1;
+for ii = 1:numel(subjects)
+    c = c * -1;
+
+    disp(['ii = ' num2str(ii) ', c = ' num2str(c)])
+
+    disp(['inverting model ' num2str(ii) '/' num2str(numel(subjects))])
+
+    clear temp
+    if c == 1
+        temp = squeeze(corrdat(1:600,:,ii));
+    else
+        temp = squeeze(corrdat(601:end,:,ii));
+    end
+
+    clear LAP1 LAP2 LAP3 LAP4
+    [LAP1, LAP2, LAP3, LAP4] = invert_model(temp', U, n, pE, pC, prec);
+
+    % output directory
+    save(['~/Library/CloudStorage/Dropbox/Phase/LAP/subj_' num2str(ii) '.mat'],'LAP1', 'LAP2', 'LAP3', 'LAP4')
+
+end
+
+c = 1;
+for ii = 1:numel(subjects)
+    c = c * -1;
+
+    disp(['inverting alternative model ' num2str(ii) '/' num2str(numel(subjects))])
+
+    clear temp
+    if c == 1
+        temp = squeeze(corrdat(1:600,:,ii));
+    else
+        temp = squeeze(corrdat(601:end,:,ii));
+    end
+
+    clear LAP1 LAP2 LAP3 LAP4
+    [LAP1, LAP2, LAP3, LAP4] = invert_model(temp', U, n, pE, pC, prec);
+
+    % output directory
+    save(['~/Library/CloudStorage/Dropbox/Phase/LAP/subj_' num2str(ii) '_alt.mat'],'LAP1', 'LAP2', 'LAP3', 'LAP4')
+
+end
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% perform model averaging
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+% temporary directories
+middir1 = '~/Desktop/k1/';
+middir2 = '~/Desktop/k2/';
+middir3 = '~/Desktop/k3/';
+middir4 = '~/Desktop/k4/';
+middir_alt1 = '~/Desktop/kalt1/';
+middir_alt2 = '~/Desktop/kalt2/';
+middir_alt3 = '~/Desktop/kalt3/';
+middir_alt4 = '~/Desktop/kalt4/';
+
+mkdir(middir1)
+rmdir(middir1,'s')
+mkdir(middir1)
+
+mkdir(middir2)
+rmdir(middir2,'s')
+mkdir(middir2)
+
+mkdir(middir3)
+rmdir(middir3,'s')
+mkdir(middir3)
+
+mkdir(middir4)
+rmdir(middir4,'s')
+mkdir(middir4)
+
+mkdir(middir_alt1)
+rmdir(middir_alt1,'s')
+mkdir(middir_alt1)
+
+mkdir(middir_alt2)
+rmdir(middir_alt2,'s')
+mkdir(middir_alt2)
+
+mkdir(middir_alt3)
+rmdir(middir_alt3,'s')
+mkdir(middir_alt3)
+
+mkdir(middir_alt4)
+rmdir(middir_alt4,'s')
+mkdir(middir_alt4)
+for ii = 1:numel(subjects)
+    ii
+
+    disp(['averaging model ' num2str(ii) '/' num2str(numel(subjects))])
+
+    clear LAP1 LAP2 LAP3 LAP4
+    load(['~/Library/CloudStorage/Dropbox/Phase/LAP/subj_' num2str(ii) '.mat'],'LAP1', 'LAP2', 'LAP3', 'LAP4')
+
+    clear DCM
+    DCM.Ep   = LAP1.qP.P{1,1};
+    DCM.Cp   = LAP1.qP.C;
+    DCM.F    = LAP1.F(end);
+    DCM.M.pC = LAP1.M(1).pC;
+    DCM.M.pE = LAP1.M(1).pE;
+    save([middir1 num2str(ii) '.mat'],'DCM')
+
+    clear DCM
+    DCM.Ep   = LAP2.qP.P{1,1};
+    DCM.Cp   = LAP2.qP.C;
+    DCM.F    = LAP2.F(end);
+    DCM.M.pC = LAP2.M(1).pC;
+    DCM.M.pE = LAP2.M(1).pE;
+    save([middir2 num2str(ii) '.mat'],'DCM')
+
+    clear DCM
+    DCM.Ep   = LAP3.qP.P{1,1};
+    DCM.Cp   = LAP3.qP.C;
+    DCM.F    = LAP3.F(end);
+    DCM.M.pC = LAP3.M(1).pC;
+    DCM.M.pE = LAP3.M(1).pE;
+    save([middir3 num2str(ii) '.mat'],'DCM')
+
+    clear DCM
+    DCM.Ep   = LAP4.qP.P{1,1};
+    DCM.Cp   = LAP4.qP.C;
+    DCM.F    = LAP4.F(end);
+    DCM.M.pC = LAP4.M(1).pC;
+    DCM.M.pE = LAP4.M(1).pE;
+    save([middir4 num2str(ii) '.mat'],'DCM')
+
+    clear LAP1 LAP2 LAP3 LAP4
+    load(['~/Library/CloudStorage/Dropbox/Phase/LAP/subj_' num2str(ii) '_alt.mat'],'LAP1', 'LAP2', 'LAP3', 'LAP4')
+
+    clear DCM
+    DCM.Ep   = LAP1.qP.P{1,1};
+    DCM.Cp   = LAP1.qP.C;
+    DCM.F    = LAP1.F(end);
+    DCM.M.pC = LAP1.M(1).pC;
+    DCM.M.pE = LAP1.M(1).pE;
+    save([middir_alt1 num2str(ii) '.mat'],'DCM')
+
+    clear DCM
+    DCM.Ep   = LAP2.qP.P{1,1};
+    DCM.Cp   = LAP2.qP.C;
+    DCM.F    = LAP2.F(end);
+    DCM.M.pC = LAP2.M(1).pC;
+    DCM.M.pE = LAP2.M(1).pE;
+    save([middir_alt2 num2str(ii) '.mat'],'DCM')
+
+    clear DCM
+    DCM.Ep   = LAP3.qP.P{1,1};
+    DCM.Cp   = LAP3.qP.C;
+    DCM.F    = LAP3.F(end);
+    DCM.M.pC = LAP3.M(1).pC;
+    DCM.M.pE = LAP3.M(1).pE;
+    save([middir_alt3 num2str(ii) '.mat'],'DCM')
+
+    clear DCM
+    DCM.Ep   = LAP4.qP.P{1,1};
+    DCM.Cp   = LAP4.qP.C;
+    DCM.F    = LAP4.F(end);
+    DCM.M.pC = LAP4.M(1).pC;
+    DCM.M.pE = LAP4.M(1).pE;
+    save([middir_alt4 num2str(ii) '.mat'],'DCM')
+
+end
+
+clear names1
+for ii           = 1:numel(subjects)
+    names1{ii}    = [middir1 num2str(ii) '.mat'];
+    names2{ii}    = [middir2 num2str(ii) '.mat'];
+    names3{ii}    = [middir3 num2str(ii) '.mat'];
+    names4{ii}    = [middir4 num2str(ii) '.mat'];
+    names_alt1{ii}    = [middir_alt1 num2str(ii) '.mat'];
+    names_alt2{ii}    = [middir_alt2 num2str(ii) '.mat'];
+    names_alt3{ii}    = [middir_alt3 num2str(ii) '.mat'];
+    names_alt4{ii}    = [middir_alt4 num2str(ii) '.mat'];
+end
+
+DCMav1 = spm_dcm_average(names1,'kav');
+DCMav2 = spm_dcm_average(names2,'kav');
+DCMav3 = spm_dcm_average(names3,'kav');
+DCMav4 = spm_dcm_average(names4,'kav');
+DCMav_alt1 = spm_dcm_average(names_alt1,'kav');
+DCMav_alt2 = spm_dcm_average(names_alt2,'kav');
+DCMav_alt3 = spm_dcm_average(names_alt3,'kav');
+DCMav_alt4 = spm_dcm_average(names_alt4,'kav');
+
+rmdir(middir1,'s')
+rmdir(middir2,'s')
+rmdir(middir3,'s')
+rmdir(middir4,'s')
+rmdir(middir_alt1,'s')
+rmdir(middir_alt2,'s')
+rmdir(middir_alt3,'s')
+rmdir(middir_alt4,'s')
+
+save('~/Library/CloudStorage/Dropbox/Phase/LAP/av.mat', 'DCMav1', 'DCMav2', 'DCMav3', 'DCMav4', 'DCMav_alt1', 'DCMav_alt2', 'DCMav_alt3', 'DCMav_alt4')
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% perform model comparisons
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+model{1}        = '1st, coupl';
+model{2}        = '2nd, coupl';
+model{3}        = '1st, no coupl';
+model{4}        = '2nd, no coupl';
+
+load('~/Library/CloudStorage/Dropbox/Phase/LAP/av.mat', 'DCMav1', 'DCMav2', 'DCMav3', 'DCMav4', 'DCMav_alt1', 'DCMav_alt2', 'DCMav_alt3', 'DCMav_alt4')
+
+clear F
+F = [DCMav1.F DCMav2.F DCMav3.F DCMav4.F];
+F = F - min(F);
+
+figure
+bar(spm_softmax(F(:)),'c')
+xlabel(model), axis square, box off
+
+clear F
+F = [DCMav_alt1.F DCMav_alt2.F DCMav_alt3.F DCMav_alt4.F];
+F = F - min(F);
+
+figure
+bar(spm_softmax(F(:)),'c')
+xlabel(model), axis square, box off
+title('alt')
