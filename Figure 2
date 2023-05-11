@@ -1,0 +1,175 @@
+clear; clc; close all; 
+
+% seed the random generator — value 0 is used to generate main results
+rng(0);
+
+% cross-croupling strengths for first-order models
+Apar(1,1,:)     = [16 4];
+Apar(1,2,:)     = [16 4];
+
+% cross-croupling strengths for second-order models, these ensure lower 
+% cross-coupling and prevent excessive divergence
+Apar(2,1,:)     = [256 128];
+Apar(2,2,:)     = [256 128];
+
+% titles for model comparison
+model{1}        = '1st, coupl';
+model{2}        = '2nd, coupl';
+model{3}        = '1st, no coupl';
+model{4}        = '2nd, no coupl';
+
+% specify the number of regions n
+n               = 3;
+
+% specify the number of time points N. base this on a sample
+% of 1/4 of the 1200 timepoint HCP data with TR of 720ms.
+N               = round(1200*0.72/4);
+
+% specify the minimum and maximum frequencies of the signals
+% constituting the synthetic fMRI data
+min_freq        = 0.01;
+max_freq        = 0.1;
+
+% specify the number of signals, sampled between the min and
+% max frequencies, to mix together to create synthetic
+% fMRI data
+num_mix         = 10;
+
+% create an intrinsic coupling matrix A, specifying the strength
+% of connections between the three regions
+A               = spm_speye(n,n,-1);
+P.A             = A/16 - A'/4 - eye(n)/16;
+
+% create an extrinsic coupling matrix C, specifying the strength
+% of connections between the external driving input and the
+% three regions
+P.C             = [1/32 1/16 1/8]';
+
+% first create three frecquencies w, by randomly sampling
+% between the minimum and maximum
+w               = min_freq + (max_freq-min_freq).*rand(1,num_mix);
+
+% next, create three random amplitudes a between 0 and 1
+a               = rand(1,num_mix);
+
+% now create the mixed signal
+for ii          = 1:num_mix
+    U1(:,ii)     = a(ii)*sin(w(ii)*(1:N));
+end
+U1               = sum(U1');
+
+% now create different random frequencies and amplitudes, then
+% create a different signal to be used in model inversion — i.e.,
+w               = min_freq + (max_freq-min_freq).*rand(1,num_mix);
+a               = rand(1,num_mix);
+
+for ii          = 1:num_mix
+    U2(:,ii)     = a(ii)*sin(w(ii)*(1:N));
+end
+U2               = sum(U2');
+
+% cycle through orders 1 and 2
+order_select    = 1:2;
+
+% cycle through intrinsic connectivity with (1) and without (0) cross-
+% connections
+conn_select     = 0:1;
+
+% prior means
+pE              = P;
+pE.A            = -eye(n)/15;
+pE.C            = ones(n,1)/15;
+pE.s            = 1;
+
+% prior variances
+pC              = spm_unvec(ones(spm_length(pE),1),pE);
+pC.C            = ones(n,1);
+pC.s            = 1;
+pC.A            = pC.A .* double(logical(P.A));
+
+% ground-truth titles
+ord_title{1,1}  = '1st';
+ord_title{1,2}  = '1st';
+ord_title{2,1}  = '2nd';
+ord_title{2,2}  = '2nd';
+
+conn_title{1,1} = 'no coupl';
+conn_title{1,2} = 'coupl';
+conn_title{2,1} = 'no coupl';
+conn_title{2,2} = 'coupl';
+
+counter         = 0;
+% cycle through first and second order
+for ii          = 1:numel(order_select)
+    order       = order_select(ii);
+    % cycle through sparsly and fully connected
+    for jj      = 1:numel(conn_select)
+        conn    = conn_select(jj);
+        counter = counter + 1;
+
+        % set internal connection strengths
+        Atemp   = squeeze(Apar(ii,jj,:));
+        P.A     = A/Atemp(1) - A'/Atemp(2) - eye(n)/16;
+
+        % generate data
+        rng(0);
+        DEM     = gen_data(order, conn, P, U1, n, 0);
+
+        figure
+        plot(DEM.Y')
+        title([ord_title{ii,jj} ', ' conn_title{ii,jj}])
+        drawnow
+
+        rng(0);
+        % invert models based on full/sparse and 1st/2nd order
+        [LAP1, LAP2, LAP3, LAP4] = invert_model(DEM.Y, U2, n, pE, pC, 0);
+
+        % model evidence
+        clear F
+        F = [LAP1.F(end) LAP2.F(end) LAP3.F(end) LAP4.F(end)];
+        F = F - min(F);
+
+        % probability
+        figure
+        bar(spm_softmax(F(:)),'c')
+        xlabel(model), axis square, box off
+        title([ord_title{ii,jj} ', ' conn_title{ii,jj}])
+        drawnow
+
+    end
+end
+
+% generate the synthetic data based on input states and parameters
+function DEM = gen_data(order,conn,P,U,n, prec)
+
+% select between first and second-order dynamics
+if order == 1
+    x.z = zeros(n,1);               
+    g   = @(x,v,P) x.z;             
+    f   = @(x,v,P) P.A*x.z + P.C*v; 
+else
+    x.y     = zeros(n,1);
+    x.z     = zeros(n,1);
+    g       = @(x,v,P) x.y;
+    f       = @(x,v,P) [x.z; P.A*x.y + P.C*v];
+end
+
+% set off-diagonal coupling to zero
+if conn == 0
+    P.A     = P.A .* eye(n);
+end
+
+% enter states, parameters and precisions into model structure M
+M(1).x      = x;
+M(1).f      = f;
+M(1).g      = g;
+M(1).pE     = P;
+M(1).V      = exp(prec);
+M(1).W      = exp(prec);
+M(2).v      = 0;
+M(2).V      = exp(prec);
+
+% generate data
+DEM         = spm_DEM_generate(M,U,P);
+
+end
