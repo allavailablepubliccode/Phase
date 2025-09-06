@@ -1,96 +1,133 @@
+%==========================================================================
+% generate_synthetic_DCM_datasets.m
+%
+% Description:
+%   This script generates synthetic datasets based on first-order and
+%   second-order dynamic causal models (DCMs) using the SPM12 DEM toolbox.
+%
+%   Each iteration creates randomized parameters for internal and external
+%   connections, generates sinusoidal inputs, simulates dynamics, and
+%   saves the resulting dataset after model inversion.
+%
+% Requirements:
+%   - SPM12 installed and on MATLAB path
+%   - 'invert_model' function defined in MATLAB path
+%
+% Output:
+%   Saves one .mat file per dataset with the inferred parameters for both
+%   1st- and 2nd-order models.
+%
+%==========================================================================
+
 clear; clc; close all;
 
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% generate 1st order synthetic data
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%-------------------------------
+% User Configuration Parameters
+%-------------------------------
 
-% enter output directory:
-dir_out = '';
+dir_out = '';           % Output directory for saved .mat files (default = current folder)
+num_datasets = 1000;    % Number of synthetic datasets to generate
+n = 3;                  % Number of observed sources
+N = 405;                % Number of time points per dataset
 
-% number of datasets to generate
-for ii = 1:1000
+% Loop through and generate each dataset
+for ii = 1:num_datasets
 
-    % number of sources
-    n       = 3;
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    % STEP 1: Generate 1st-Order System
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-    % initial states
+    % Define initial state vector for each node
     clear x
-    x.z     = zeros(n,1);
+    x.z = zeros(n,1);    % Latent neural states
 
-    % observation function
-    g       = @(x,v,P) x.z;
+    % Define observation function: maps latent states to observed outputs
+    g = @(x,v,P) x.z;
 
-    % equation of motion
-    f       = @(x,v,P) P.A*x.z + P.C*v;
+    % Define evolution function: linear first-order dynamics
+    f = @(x,v,P) P.A * x.z + P.C * v;
 
-    % number of time points
-    N       = 405;
-
-    % randomized internal self-connections
+    % Initialize DCM parameters (P)
     clear P
-    P.A     = zeros(n);
-    r = 0.3 + (0.7-0.3)*rand(1,n);
-    P.A(logical(eye(size(P.A)))) = -r;
+    P.A = zeros(n);                        % Internal (self) connections
+    r = 0.3 + (0.7 - 0.3) * rand(1,n);     % Random negative self-connections
+    P.A(logical(eye(n))) = -r;            % Set diagonals of A
 
-    % randomized external connections
-    P.C     = 0.3 + (0.7-0.3)*rand(1,n);
-    P.C     = P.C .* eye(n);
+    P.C = 0.3 + (0.7 - 0.3) * rand(1,n);   % External connections
+    P.C = P.C .* eye(n);                  % Diagonal input connections only
 
-    % randomized sinusoidal driving inputs
-    U       = rand(n,1).*sin(rand(n,1).*(1:N) + rand);
+    % Define sinusoidal input U with random amplitude, frequency, phase
+    U = rand(n,1) .* sin(rand(n,1) .* (1:N) + rand);
 
-    % first level state space model
-    %--------------------------------------------------------------------------
+    % Construct SPM DEM model structure (1st order)
     clear M
-    M(1).x  = x;                             % initial states
-    M(1).f  = f;                             % equations of motion
-    M(1).g  = g;                             % observation mapping
-    M(1).pE = P;                             % model parameters
-    M(1).V  = exp(4)*ones(n,1);                       % precision of observation noise
-    M(1).W  = exp(4)*ones(n,1);                       % precision of state noise
+    M(1).x  = x;            % Initial states
+    M(1).f  = f;            % Evolution function
+    M(1).g  = g;            % Observation function
+    M(1).pE = P;            % Parameter estimates
+    M(1).V  = exp(4)*ones(n,1);  % Observation noise precision
+    M(1).W  = exp(4)*ones(n,1);  % State noise precision
 
-    % second level  causes or exogenous forcing term
-    %--------------------------------------------------------------------------
-    M(2).v  = zeros(n,1);                             % initial causes
-    M(2).V  = exp(4)*ones(n,1);                       % precision of exogenous causes
+    % Second-level model (exogenous causes)
+    M(2).v = zeros(n,1);
+    M(2).V = exp(4)*ones(n,1);
 
-    DEM_1     = spm_DEM_generate(M,U,P);
+    % Generate synthetic data using SPM’s DEM engine
+    DEM_1 = spm_DEM_generate(M, U, P);
 
-    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-    % generate 2nd order synthetic data
-    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    % STEP 2: Generate 2nd-Order System
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
     clear x
-    x.y     = zeros(n,1);
-    x.z     = zeros(n,1);
-    g       = @(x,v,P) x.y;
-    f       = @(x,v,P) [x.z; P.A*x.y + P.C*v];
+    x.y = zeros(n,1);   % Position-like state
+    x.z = zeros(n,1);   % Velocity-like state
 
-    M(1).x  = x;                             % initial states
-    M(1).f  = f;                             % equations of motion
-    M(1).g  = g;                             % observation mapping
+    % Observation: only observe position
+    g = @(x,v,P) x.y;
 
-    DEM_2     = spm_DEM_generate(M,U,P);
+    % Evolution: second-order dynamics as 2 coupled 1st-order equations
+    f = @(x,v,P) [x.z; P.A * x.y + P.C * v];
 
+    % Reuse same parameters and input
+    M(1).x = x;
+    M(1).f = f;
+    M(1).g = g;
+
+    DEM_2 = spm_DEM_generate(M, U, P);
+
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    % STEP 3: Invert Models to Estimate Parameters
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+    % Define prior expectations (mean)
     clear pE
     pE.A = zeros(n);
     pE.C = zeros(n,1);
     pE.s = 1;
 
+    % Define prior covariances (uncertainty)
     clear pC
     pC.A = eye(n);
     pC.C = ones(n,1);
     pC.s = 1;
 
-    U = zeros(1,N);
+    % No inputs during inversion
+    U_null = zeros(1,N);
 
+    % Variational precision (inverse noise)
     prec = 4;
 
+    % Variational mode (1 = Laplace, 0 = fixed)
     varparam = 1;
 
-    [LAP_g1_1, LAP_g1_2] = invert_model(DEM_1.Y, U, n, pE, pC, prec, varparam);
-    [LAP_g2_1, LAP_g2_2] = invert_model(DEM_2.Y, U, n, pE, pC, prec, varparam);
+    % Invert 1st- and 2nd-order models
+    [LAP_g1_1, LAP_g1_2] = invert_model(DEM_1.Y, U_null, n, pE, pC, prec, varparam);
+    [LAP_g2_1, LAP_g2_2] = invert_model(DEM_2.Y, U_null, n, pE, pC, prec, varparam);
 
-    save([dir_out num2str(ii) '.mat'],'LAP_g1_1','LAP_g1_2','LAP_g2_1','LAP_g2_2')
+    % Save results
+    save(fullfile(dir_out, sprintf('%04d.mat', ii)), ...
+         'LAP_g1_1','LAP_g1_2','LAP_g2_1','LAP_g2_2');
 
 end
